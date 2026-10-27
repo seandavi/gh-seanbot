@@ -1,4 +1,5 @@
 import json
+import os
 
 import pytest
 
@@ -16,6 +17,7 @@ private_key = "/private/app.pem"
 [repositories]
 "owner/test" = ["read", "contribute"]
 """)
+    path.chmod(0o600)
     return path
 
 
@@ -27,6 +29,38 @@ def test_policy_allowlist(tmp_path):
             load_policy(path, repo, "read")
     with pytest.raises(SeanbotError):
         load_policy(path, "owner/test", "admin")
+
+
+@pytest.mark.parametrize("mode", [0o640, 0o620, 0o604, 0o602])
+def test_policy_rejects_shared_modes(tmp_path, mode):
+    path = config(tmp_path)
+    path.chmod(mode)
+    with pytest.raises(SeanbotError, match="mode 0600"):
+        load_policy(path, "owner/test", "read")
+
+
+def test_policy_accepts_read_only(tmp_path):
+    path = config(tmp_path)
+    path.chmod(0o400)
+    assert load_policy(path, "owner/test", "read").repository == "owner/test"
+
+
+def test_policy_symlink(tmp_path):
+    link = tmp_path / "link"
+    link.symlink_to(config(tmp_path))
+    with pytest.raises(SeanbotError):
+        load_policy(link, "owner/test", "read")
+
+
+def test_policy_not_regular(tmp_path):
+    directory = tmp_path / "dir"
+    directory.mkdir(mode=0o700)
+    directory.chmod(0o700)
+    fifo = tmp_path / "fifo"
+    os.mkfifo(fifo, 0o600)
+    for path in (directory, fifo):
+        with pytest.raises(SeanbotError, match="regular file"):
+            load_policy(path, "owner/test", "read")
 
 
 @pytest.mark.parametrize(

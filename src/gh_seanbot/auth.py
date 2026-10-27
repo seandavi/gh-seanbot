@@ -5,6 +5,7 @@ import stat
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import Any, NoReturn
 
 import httpx
 import jwt
@@ -52,11 +53,21 @@ def mint(policy: Policy, client: httpx.Client) -> InstallationToken:
         if response.status_code != 201:
             raise SeanbotError(f"Installation token mint failed (HTTP {response.status_code})")
         body = response.json()
-        token = InstallationToken(
-            body["token"], datetime.fromisoformat(body["expires_at"].replace("Z", "+00:00"))
-        )
-        if not isinstance(token.value, str) or not token.value or token.remaining() <= 0:
+        value = body["token"]
+        if not isinstance(value, str) or not value:
             raise ValueError
+        # A usable credential exists from here on: every failure must revoke it.
+        try:
+            token = InstallationToken(
+                value, datetime.fromisoformat(body["expires_at"].replace("Z", "+00:00"))
+            )
+            valid = token.remaining() > 0
+        except (ValueError, KeyError, TypeError, AttributeError, OverflowError):
+            valid = False
+        if not valid:
+            _revoke_and_raise(value, client, "Could not validate the token response")
+        if not _scope_matches(body, policy):
+            _revoke_and_raise(value, client, "Minted token scope does not match the request")
         return token
     except SeanbotError:
         raise
@@ -84,6 +95,29 @@ def revoke(token: InstallationToken, client: httpx.Client) -> bool:
         )
     except httpx.HTTPError:
         return False
+
+
+def _revoke_and_raise(value: str, client: httpx.Client, message: str) -> NoReturn:
+    if revoke(InstallationToken(value, datetime.now(UTC)), client):
+        raise SeanbotError(f"{message}; token revoked") from None
+    raise SeanbotError(
+        f"{message}; revocation failed, token may remain valid until expiry"
+    ) from None
+
+
+def _scope_matches(body: dict[str, Any], policy: Policy) -> bool:
+    repositories = body.get("repositories")
+    return (
+        body.get("repository_selection") == "selected"
+        and isinstance(repositories, list)
+        and len(repositories) == 1
+        and isinstance(repositories[0], dict)
+        and isinstance(repositories[0].get("full_name"), str)
+        and repositories[0]["full_name"].lower() == policy.repository.lower()
+        # Every App has implicit repository metadata read; GitHub may report it unrequested.
+        and body.get("permissions")
+        in (policy.permissions, policy.permissions | {"metadata": "read"})
+    )
 
 
 def _headers(credential: str) -> dict[str, str]:

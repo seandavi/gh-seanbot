@@ -1,6 +1,7 @@
 import json
 from datetime import UTC, datetime, timedelta
 
+import httpx
 import pytest
 
 from gh_seanbot.auth import InstallationToken
@@ -8,12 +9,12 @@ from gh_seanbot.cli import execute, parser
 from gh_seanbot.config import SeanbotError
 
 
-def arguments():
+def arguments(policy_path="policy.toml"):
     return parser().parse_args(
         [
             "api",
             "--policy",
-            "policy.toml",
+            str(policy_path),
             "--repo",
             "owner/test",
             "--harness",
@@ -47,6 +48,24 @@ def test_lifecycle_and_revocation(policy, monkeypatch):
         "finished",
         "revoked",
     ]
+
+
+def test_unsafe_policy_prevents_audit_and_mint(tmp_path, monkeypatch):
+    audit = tmp_path / "audit.jsonl"
+    path = tmp_path / "policy.toml"
+    path.write_text(f"""audit_log = "{audit}"
+[app]
+client_id = "Iv1.example"
+installation_id = 123
+private_key = "{tmp_path / "app.pem"}"
+[repositories]
+"owner/test" = ["read"]
+""")
+    path.chmod(0o644)
+    monkeypatch.setattr("gh_seanbot.cli.mint", lambda *a: pytest.fail("minted"))
+    with pytest.raises(SeanbotError, match="mode 0600"):
+        execute(arguments(path))
+    assert not audit.exists()
 
 
 def test_failed_mint_never_launches(policy, monkeypatch):
@@ -99,3 +118,37 @@ def test_revocation_failure_is_nonzero(policy, monkeypatch):
     monkeypatch.setattr("gh_seanbot.cli.run_process", lambda *a: 0)
     with pytest.raises(SeanbotError, match="revocation"):
         execute(arguments())
+
+
+def test_scope_mismatch_never_launches(policy, monkeypatch):
+    monkeypatch.setattr("gh_seanbot.cli.load_policy", lambda *a: policy)
+    monkeypatch.setattr("gh_seanbot.cli.run_process", lambda *a: pytest.fail("launched"))
+    methods = []
+
+    def handler(request):
+        methods.append(request.method)
+        if request.method == "GET":
+            return httpx.Response(200, json={"id": 123})
+        if request.method == "DELETE":
+            return httpx.Response(204)
+        return httpx.Response(
+            201,
+            json={
+                "token": "ghs_TEST_SECRET",
+                "expires_at": (datetime.now(UTC) + timedelta(hours=1)).isoformat(),
+                "permissions": {"contents": "write", "issues": "write"},
+                "repository_selection": "selected",
+                "repositories": [{"full_name": "owner/test"}],
+            },
+        )
+
+    real = httpx.Client
+    monkeypatch.setattr(
+        httpx, "Client", lambda **kw: real(transport=httpx.MockTransport(handler), **kw)
+    )
+    with pytest.raises(SeanbotError, match="token revoked"):
+        execute(arguments())
+    assert "DELETE" in methods
+    text = policy.audit_log.read_text()
+    assert "SECRET" not in text
+    assert [json.loads(line)["event"] for line in text.splitlines()] == ["started", "failed"]
