@@ -46,7 +46,7 @@ All are assigned to `seandavi`. The tracking issue stays open until deployment a
 
 ## Acceptance evidence
 
-Offline tests cover signed JWT claims, installation matching, explicit token request scope, redacted failures, unsafe key/audit files, policy denials, footer round trips, child environment isolation, fixed API paths, subprocess deadlines, isolated push configuration, and revocation after command failure. These tests use generated keys, mocked HTTP, local git repositories, and stubbed network commands. They do not contact GitHub as an App.
+Offline tests cover signed JWT claims, installation matching, explicit token request scope, redacted failures, unsafe key/audit/policy files, policy denials, footer round trips, child environment isolation, fixed API paths, subprocess deadlines, isolated push configuration, and revocation after command failure. These tests use generated keys, mocked HTTP, local git repositories, and stubbed network commands. They do not contact GitHub as an App.
 
 Before rollout, run the full README acceptance checklist on the actual installation. In particular, verify bot actor records for all intended writes, actual denied writes outside scope, renewal/expiry/revocation, behavior with existing human credentials, and repository approval/bypass rules. Test push behavior with the actual git/GitHub versions and confirm authorship separately. No live App verification has been performed by this implementation.
 

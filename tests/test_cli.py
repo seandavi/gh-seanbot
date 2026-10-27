@@ -8,12 +8,12 @@ from gh_seanbot.cli import execute, parser
 from gh_seanbot.config import SeanbotError
 
 
-def arguments():
+def arguments(policy_path="policy.toml"):
     return parser().parse_args(
         [
             "api",
             "--policy",
-            "policy.toml",
+            str(policy_path),
             "--repo",
             "owner/test",
             "--harness",
@@ -47,6 +47,24 @@ def test_lifecycle_and_revocation(policy, monkeypatch):
         "finished",
         "revoked",
     ]
+
+
+def test_unsafe_policy_prevents_audit_and_mint(tmp_path, monkeypatch):
+    audit = tmp_path / "audit.jsonl"
+    path = tmp_path / "policy.toml"
+    path.write_text(f"""audit_log = "{audit}"
+[app]
+client_id = "Iv1.example"
+installation_id = 123
+private_key = "{tmp_path / "app.pem"}"
+[repositories]
+"owner/test" = ["read"]
+""")
+    path.chmod(0o644)
+    monkeypatch.setattr("gh_seanbot.cli.mint", lambda *a: pytest.fail("minted"))
+    with pytest.raises(SeanbotError, match="mode 0600"):
+        execute(arguments(path))
+    assert not audit.exists()
 
 
 def test_failed_mint_never_launches(policy, monkeypatch):
