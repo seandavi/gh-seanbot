@@ -109,42 +109,40 @@ After cleanup:
 ### 4. Resulting `execute` body (from the `httpx.Client` block)
 
 ```python
-    with httpx.Client(timeout=20, trust_env=False, follow_redirects=False) as client:
-        token = None
-        revoked = False
-        failed = False
-        deferred: list[int] = []
-        try:
-            token = mint(policy, client)
-            audit.record(provenance, args.repo, args.capability, "authenticated")
-            with tempfile.TemporaryDirectory(prefix="seanbot-home-") as directory:
-                ...  # unchanged
-            audit.record(provenance, args.repo, args.capability, "finished", exit_code=code)
-        except BaseException:
-            failed = True
-            _record_during_failure(
-                lambda: audit.record(provenance, args.repo, args.capability, "failed")
-            )
-            raise
-        finally:
-            if token is not None:
-                with _deferred_signals(deferred):
-                    revoked = revoke(token, client)
-                    if failed:
-                        _record_during_failure(
-                            lambda: audit.record(
-                                provenance, args.repo, args.capability, "revoked", success=revoked
-                            )
-                        )
-                    else:
-                        audit.record(
+with httpx.Client(timeout=20, trust_env=False, follow_redirects=False) as client:
+    token = None
+    revoked = False
+    failed = False
+    deferred: list[int] = []
+    try:
+        token = mint(policy, client)
+        audit.record(provenance, args.repo, args.capability, "authenticated")
+        with tempfile.TemporaryDirectory(prefix="seanbot-home-") as directory:
+            ...  # unchanged
+        audit.record(provenance, args.repo, args.capability, "finished", exit_code=code)
+    except BaseException:
+        failed = True
+        _record_during_failure(
+            lambda: audit.record(provenance, args.repo, args.capability, "failed")
+        )
+        raise
+    finally:
+        if token is not None:
+            with _deferred_signals(deferred):
+                revoked = revoke(token, client)
+                if failed:
+                    _record_during_failure(
+                        lambda: audit.record(
                             provenance, args.repo, args.capability, "revoked", success=revoked
                         )
-        if not revoked:
-            raise SeanbotError("Command ended, but token revocation failed; token may remain valid")
-        if deferred:
-            raise KeyboardInterrupt
-        return code
+                    )
+                else:
+                    audit.record(provenance, args.repo, args.capability, "revoked", success=revoked)
+    if not revoked:
+        raise SeanbotError("Command ended, but token revocation failed; token may remain valid")
+    if deferred:
+        raise KeyboardInterrupt
+    return code
 ```
 
 The order is unchanged: write the `started` audit record → mint → write `authenticated` → run one command → write `finished`, or `failed` on exception → revoke → write `revoked`. Only the error handling around the cleanup writes changes, plus signal deferral around the final two steps. Nothing new is minted, requested, or checked.
