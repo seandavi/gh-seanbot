@@ -9,7 +9,7 @@ import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-from .config import SeanbotError
+from .config import SeanbotError, valid_branch
 
 
 # Start from a small allowlist, rather than trying to enumerate every inherited secret.
@@ -89,15 +89,7 @@ def push(
     deadline = time.monotonic() + timeout
     if not re.fullmatch(r"[0-9a-f]{40}", sha):
         raise SeanbotError("Push requires an explicit full SHA-1 commit ID")
-    # Git's check-ref-format rules for refs/heads/<branch>, within a stricter character set.
-    if (
-        not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_./-]*", branch)
-        or ".." in branch
-        or branch.endswith(".")
-        or any(
-            not part or part.startswith(".") or part.endswith(".lock") for part in branch.split("/")
-        )
-    ):
+    if not valid_branch(branch):
         raise SeanbotError("Invalid destination branch")
     # Source repository configuration never participates in the network operation.
     # Only object files are shared with a disposable bare repository.
