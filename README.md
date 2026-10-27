@@ -34,7 +34,7 @@ gh-seanbot push --policy policy.toml --repo OWNER/REPO \
   --capability push --sha FULL_COMMIT_SHA --branch agent/example
 ```
 
-API endpoints are relative to `repos/OWNER/REPO/`, without host overrides or query parameters. JSON request bodies come from files. The footer helper is explicit: API payloads are not silently rewritten, and human-authored content must not be reattributed.
+API endpoints are relative to `repos/OWNER/REPO/`, without host overrides or query parameters. JSON request bodies come from files. The footer helper is explicit: API payloads are not silently rewritten, and human-authored content must not be reattributed. The footer helper reads and writes UTF-8 and rejects input that is not valid UTF-8.
 
 Capabilities: `read` (contents, PRs, issues read); `issues` (issues write); `pull-requests` (contents read, PRs write); `push` (contents write); `merge` (contents and PRs write); `contribute` (contents, PRs, issues write). Choose the narrowest profile; permission grants do not constitute approval to merge.
 
