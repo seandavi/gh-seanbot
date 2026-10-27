@@ -42,7 +42,9 @@ def environment(parent: Mapping[str, str], token: str, repo: str, home: Path) ->
 
 def api_command(repository: str, method: str, endpoint: str, payload: Path | None) -> list[str]:
     # No host overrides, absolute URLs, query strings, traversal, or arbitrary gh subcommands.
-    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*(?:/[A-Za-z0-9_-]+)*", endpoint):
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*(?:/[A-Za-z0-9_.-]+)*", endpoint) or any(
+        set(segment) == {"."} for segment in endpoint.split("/")
+    ):
         raise SeanbotError(
             "Endpoint must be a relative repository API path without query parameters"
         )
@@ -87,8 +89,14 @@ def push(
     deadline = time.monotonic() + timeout
     if not re.fullmatch(r"[0-9a-f]{40}", sha):
         raise SeanbotError("Push requires an explicit full SHA-1 commit ID")
-    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_/-]*", branch) or any(
-        part in {"", ".", ".."} for part in branch.split("/")
+    # Git's check-ref-format rules for refs/heads/<branch>, within a stricter character set.
+    if (
+        not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_./-]*", branch)
+        or ".." in branch
+        or branch.endswith(".")
+        or any(
+            not part or part.startswith(".") or part.endswith(".lock") for part in branch.split("/")
+        )
     ):
         raise SeanbotError("Invalid destination branch")
     # Source repository configuration never participates in the network operation.
