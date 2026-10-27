@@ -1,6 +1,8 @@
 """Operator-owned allowlist; deliberately limited to github.com."""
 
+import os
 import re
+import stat
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,8 +25,14 @@ DEFAULT_PUSH_BRANCH_PREFIXES: tuple[str, ...] = ("agent/",)
 
 
 def valid_branch(name: str) -> bool:
-    return re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_/-]*", name) is not None and not any(
-        part in {"", ".", ".."} for part in name.split("/")
+    # Git's check-ref-format rules for refs/heads/<branch>, within a stricter character set.
+    return (
+        re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_./-]*", name) is not None
+        and ".." not in name
+        and not name.endswith(".")
+        and not any(
+            not part or part.startswith(".") or part.endswith(".lock") for part in name.split("/")
+        )
     )
 
 
@@ -52,7 +60,17 @@ def load_policy(path: Path, repository: str, capability: str) -> Policy:
     if capability not in PROFILES:
         raise SeanbotError("Unknown capability")
     try:
-        data = tomllib.loads(path.read_text())
+        # Refuse symlinks and group/world-accessible policy, like the key and audit log.
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077:
+                raise SeanbotError("Policy file must be a regular file with mode 0600 or stricter")
+        except BaseException:
+            os.close(fd)
+            raise
+        with os.fdopen(fd, "rb") as stream:
+            data = tomllib.load(stream)
         if (
             not {"app", "repositories", "audit_log"}
             <= set(data)

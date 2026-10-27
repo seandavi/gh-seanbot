@@ -42,7 +42,9 @@ def environment(parent: Mapping[str, str], token: str, repo: str, home: Path) ->
 
 def api_command(repository: str, method: str, endpoint: str, payload: Path | None) -> list[str]:
     # No host overrides, absolute URLs, query strings, traversal, or arbitrary gh subcommands.
-    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*(?:/[A-Za-z0-9_-]+)*", endpoint):
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*(?:/[A-Za-z0-9_.-]+)*", endpoint) or any(
+        set(segment) == {"."} for segment in endpoint.split("/")
+    ):
         raise SeanbotError(
             "Endpoint must be a relative repository API path without query parameters"
         )
