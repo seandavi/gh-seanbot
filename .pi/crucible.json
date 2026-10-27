@@ -1,0 +1,21 @@
+{
+  "$schema": "https://raw.githubusercontent.com/seandavi/pi-crucible/main/schema/crucible.schema.json",
+  "worktreeRoot": "../gh-seanbot-worktrees",
+  "defaultLenses": ["code", "security"],
+  "parent": 1,
+  "design": "gh-seanbot's design record is AGENTS.md, README.md (install, command reference, rollout plan), docs/operations.md and docs/adr/ (ADR 0001 shared GitHub App identity, 0002 scoped credentials without human fallback, 0003 reuse Actions auth and bound local operations). Open and closed issues in seandavi/gh-seanbot record decisions; read the tracking issue #1 too. ADRs are inputs, not constraints: if evidence changes, say so in the spec rather than bending the code to fit.",
+  "seamNote": "the credential boundary (auth.py token minting and revocation, config.py policy loading, runner.py operation execution) and the CLI that harness integrations (#7) will call",
+  "spec": {
+    "design": "the policy file keys and their validation; CLI arguments, exit codes and output; what is minted, requested, checked and revoked, and in what order; failure modes and how each fails closed; which README, docs/ and ADR sections change"
+  },
+  "implement": "Run uv sync --locked first. Tests use mocks and fixtures only: no test calls GitHub, reads a real App private key or uses the human's gh login. Never print credentials, put them in command arguments, or write them to logs, fixtures, specs or PR bodies. Fail closed on every credential error. Do not claim live App behaviour from mocked tests; say what was tested.",
+  "checks": [
+    { "name": "lint", "command": "uv run ruff check . && uv run ruff format --check ." },
+    { "name": "typecheck", "command": "uv run mypy" },
+    { "name": "test", "command": "uv run pytest -ra" }
+  ],
+  "lenses": {
+    "code": "CODE review. Correctness against the spec and its acceptance criteria; strict mypy types; small, testable credential boundary; tests that would catch a regression without network or real keys; README, docs/ and ADRs agree with the code. A stale spec, README or ADR is \"major\".",
+    "security": "SECURITY review. Can any path fall back to the human's credentials or modify the global gh login? Do credential errors fail closed? Are tokens, keys or JWTs ever printed, logged, placed in argv or environment visible to child processes beyond the intended one, or written to disk? Are file permission checks on keys, policy and audit log enforced before use? Is minted token scope no wider than the policy allows, and is revocation attempted on every exit path including signals? Is untrusted input (branch names, endpoints, repo names, issue text) validated before it reaches git, the API or a shell? Any widening of credential exposure is \"blocker\"."
+  }
+}
