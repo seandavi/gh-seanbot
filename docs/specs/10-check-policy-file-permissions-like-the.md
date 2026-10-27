@@ -4,7 +4,7 @@ Part of tracking issue #1. Defense in depth, not containment: a same-user proces
 
 ## Goal
 
-`load_policy` (`src/gh_seanbot/config.py`) must refuse a policy file unless it is a regular, non-symlink file with no group/world permission bits (`st_mode & 0o077 == 0`). The check uses the same open-then-`fstat` pattern the key (`auth.mint`) and audit log (`provenance.Audit.record`) already use. Every refusal fails closed before any audit write, JWT, network call, or child process.
+`load_policy` (`src/gh_seanbot/config.py`) must refuse a policy file unless it is a regular, non-symlink file with no group/world permission bits (`st_mode & 0o077 == 0`). The check opens with `O_NOFOLLOW` and runs `fstat` on the descriptor, the same intent as the key (`auth.mint`) and audit log (`provenance.Audit.record`) checks, but `fstat` runs before `os.fdopen` (see File check). Every refusal fails closed before any audit write, JWT, network call, or child process.
 
 ## Non-goals
 
@@ -28,12 +28,18 @@ Replace `tomllib.loads(path.read_text())` inside the existing `try` block with:
 ```python
 # Refuse symlinks and group/world-accessible policy, like the key and audit log.
 fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-with os.fdopen(fd, "rb") as stream:
-    info = os.fstat(stream.fileno())
+try:
+    info = os.fstat(fd)
     if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077:
         raise SeanbotError("Policy file must be a regular file with mode 0600 or stricter")
+except BaseException:
+    os.close(fd)
+    raise
+with os.fdopen(fd, "rb") as stream:
     data = tomllib.load(stream)
 ```
+
+The check has to run on the raw descriptor before `os.fdopen`: `fdopen` raises `IsADirectoryError` (an `OSError`) for a directory descriptor, which would produce the generic error instead of the "regular file" message, and it does not close a caller-supplied fd when it fails, so the fd would leak. `auth.mint` uses the `fdopen`-first order and is not changed here (see Non-goals).
 
 - Add `import os` and `import stat`. No new dependency.
 - `tomllib.load(fp: IO[bytes])` parses a binary file object. This was checked against the stdlib signature and docstring ("Parse TOML from a binary file object").
@@ -41,7 +47,7 @@ with os.fdopen(fd, "rb") as stream:
 - The `fstat` runs on the opened descriptor, so the check and the read hit the same inode (no TOCTOU race).
 - `O_NOFOLLOW` makes `os.open` fail with `ELOOP` (an `OSError`) when the final path component is a symlink. That error maps to the existing generic "Invalid or unreadable policy file" message, the same way a symlinked key maps to the generic auth error. Symlinks in parent components are still followed (ancestors are the operator's job, per the non-goals).
 - `O_NONBLOCK` stops a FIFO from blocking the open. The FIFO then fails `S_ISREG`.
-- A directory opens `O_RDONLY` on Linux and fails `S_ISREG`.
+- A directory opens `O_RDONLY` on Linux and fails `S_ISREG` on the raw fd, before `fdopen` is reached.
 - The new `SeanbotError` is raised inside the `try`. `SeanbotError` subclasses `Exception` and is not in the caught tuple, so it propagates unchanged, like the existing "not allowed by policy" error.
 - Order inside `load_policy`: the repository/capability argument checks still run first, then the file check, then parsing and validation.
 
