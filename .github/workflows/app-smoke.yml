@@ -1,0 +1,24 @@
+name: App authentication smoke test
+# Opt-in, trusted manual execution only. No checkout, PR code, or write operation.
+on:
+  workflow_dispatch:
+permissions: {}
+jobs:
+  app-smoke:
+    if: github.ref == 'refs/heads/main' && vars.SEANBOT_APP_SMOKE_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
+        id: app-token
+        with:
+          client-id: ${{ vars.APP_CLIENT_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-issues: read
+      - name: Verify repository API access without logging payloads
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          GH_PROMPT_DISABLED: '1'
+        run: gh api "repos/$GH_REPO/issues" --jq length
