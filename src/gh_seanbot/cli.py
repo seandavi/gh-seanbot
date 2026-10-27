@@ -6,6 +6,8 @@ import signal
 import subprocess
 import sys
 import tempfile
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import httpx
@@ -44,11 +46,39 @@ def parser() -> argparse.ArgumentParser:
     return result
 
 
+def _record_during_failure(record: Callable[[], None]) -> None:
+    """Run a cleanup audit write without replacing the exception that ended the command."""
+    try:
+        record()
+    except SeanbotError as error:
+        print(f"gh-seanbot: audit write failed during cleanup: {error}", file=sys.stderr)
+
+
+@contextmanager
+def _deferred_signals(received: list[int]) -> Iterator[None]:
+    """Hold SIGINT/SIGTERM until revocation and its audit record finish."""
+
+    def hold(signum: int, frame: object) -> None:
+        received.append(signum)
+
+    previous = {number: signal.signal(number, hold) for number in (signal.SIGINT, signal.SIGTERM)}
+    try:
+        yield
+    finally:
+        for number, handler in previous.items():
+            signal.signal(number, signal.SIG_DFL if handler is None else handler)
+
+
 def execute(args: argparse.Namespace) -> int:
     provenance = Provenance(args.harness, args.model, args.run)
     if args.command == "footer":
-        body = args.body.read_text() if args.body else sys.stdin.read()
-        sys.stdout.write(provenance.footer(body))
+        raw = args.body.read_bytes() if args.body else sys.stdin.buffer.read()
+        try:
+            body = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            raise SeanbotError("Footer input must be valid UTF-8 text") from None
+        sys.stdout.buffer.write(provenance.footer(body).encode("utf-8"))
+        sys.stdout.flush()
         return 0
     if args.max_seconds <= 0:
         raise SeanbotError("--max-seconds must be positive")
@@ -65,6 +95,9 @@ def execute(args: argparse.Namespace) -> int:
     # Ignore proxy/netrc configuration inherited from a human environment.
     with httpx.Client(timeout=20, trust_env=False, follow_redirects=False) as client:
         token = None
+        revoked = False
+        failed = False
+        deferred: list[int] = []
         try:
             token = mint(policy, client)
             audit.record(provenance, args.repo, args.capability, "authenticated")
@@ -77,14 +110,29 @@ def execute(args: argparse.Namespace) -> int:
                     code = push(policy.repository, args.sha, args.branch, args.source, env, timeout)
             audit.record(provenance, args.repo, args.capability, "finished", exit_code=code)
         except BaseException:
-            audit.record(provenance, args.repo, args.capability, "failed")
+            failed = True
+            _record_during_failure(
+                lambda: audit.record(provenance, args.repo, args.capability, "failed")
+            )
             raise
         finally:
             if token is not None:
-                revoked = revoke(token, client)
-                audit.record(provenance, args.repo, args.capability, "revoked", success=revoked)
+                with _deferred_signals(deferred):
+                    revoked = revoke(token, client)
+                    if failed:
+                        _record_during_failure(
+                            lambda: audit.record(
+                                provenance, args.repo, args.capability, "revoked", success=revoked
+                            )
+                        )
+                    else:
+                        audit.record(
+                            provenance, args.repo, args.capability, "revoked", success=revoked
+                        )
         if not revoked:
             raise SeanbotError("Command ended, but token revocation failed; token may remain valid")
+        if deferred:
+            raise KeyboardInterrupt
         return code
 
 
