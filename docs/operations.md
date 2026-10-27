@@ -12,7 +12,7 @@ Trust the installed `git`, `gh`, Python environment, PATH, temporary directory, 
 
 The lifecycle audit contains identifiers, repository, capability, timestamps, exit code, and revocation outcome, not commands, request/response bodies, JWTs, keys, or tokens. It is not an immutable action ledger and does not retain session transcripts or prove footer authenticity. Run IDs must be linked to retained session records by the harness/operator. Do not use sensitive data as an identifier. API response output is intentionally passed through to the terminal and may itself contain private repository content; protect terminal/session logs accordingly.
 
-A mint or initial audit failure prevents execution. Token revocation runs after command success or failure; revocation failure produces a nonzero CLI result and an audit event. A process crash, SIGKILL, machine loss, or interruption during minting can prevent cleanup; token expiry remains the ultimate bound. Temporary directories and process groups are defense in depth, not containment of malicious processes.
+A mint or initial audit failure prevents execution. If the granted repository or permissions differ from the request (apart from an implicit `metadata: read`), the launcher revokes the token and fails without running the command; the audit log records `failed` and the revocation outcome appears only in the error message. Token revocation runs after command success or failure; revocation failure produces a nonzero CLI result and an audit event. A process crash, SIGKILL, machine loss, or interruption during minting can prevent cleanup; token expiry remains the ultimate bound. Temporary directories and process groups are defense in depth, not containment of malicious processes.
 
 ## GitHub Actions: reuse the official token action
 
@@ -46,7 +46,7 @@ All are assigned to `seandavi`. The tracking issue stays open until deployment a
 
 ## Acceptance evidence
 
-Offline tests cover signed JWT claims, installation matching, explicit token request scope, redacted failures, unsafe key/audit files, policy denials, footer round trips, child environment isolation, fixed API paths, subprocess deadlines, isolated push configuration, and revocation after command failure. These tests use generated keys, mocked HTTP, local git repositories, and stubbed network commands. They do not contact GitHub as an App.
+Offline tests cover signed JWT claims, installation matching, explicit token request scope, redacted failures, granted-scope verification with revocation on mismatch, unsafe key/audit files, policy denials, footer round trips, child environment isolation, fixed API paths, subprocess deadlines, isolated push configuration, and revocation after command failure. These tests use generated keys, mocked HTTP, local git repositories, and stubbed network commands. They do not contact GitHub as an App.
 
 Before rollout, run the full [acceptance checklist](rollout.md#5-verify-in-a-test-repository) on the actual installation. In particular, verify bot actor records for all intended writes, actual denied writes outside scope, renewal/expiry/revocation, behavior with existing human credentials, and repository approval/bypass rules. Test push behavior with the actual git/GitHub versions and confirm authorship separately. No live App verification has been performed by this implementation.
 
