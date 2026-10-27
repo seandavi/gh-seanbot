@@ -38,7 +38,7 @@ API endpoints are relative to `repos/OWNER/REPO/`, without host overrides or que
 
 Capabilities: `read` (contents, PRs, issues read); `issues` (issues write); `pull-requests` (contents read, PRs write); `push` (contents write); `merge` (contents and PRs write); `contribute` (contents, PRs, issues write). Choose the narrowest profile; permission grants do not constitute approval to merge.
 
-Every invocation mints a fresh, narrowed token, launches a single foreground operation, and attempts revocation afterward. The command deadline is the earlier of `--max-seconds` (default 900) and token expiry minus 60 seconds. There is no long-lived token export, in-process background refresh, or unrestricted agent launcher. This is credential hygiene for trusted callers, **not an OS sandbox or a deployed broker**.
+Every invocation mints a fresh, narrowed token, verifies that GitHub granted exactly the requested repository and permissions (revoking it otherwise), launches a single foreground operation, and attempts revocation afterward. The command deadline is the earlier of `--max-seconds` (default 900) and token expiry minus 60 seconds. There is no long-lived token export, in-process background refresh, or unrestricted agent launcher. This is credential hygiene for trusted callers, **not an OS sandbox or a deployed broker**.
 
 ## CI and rollout
 
