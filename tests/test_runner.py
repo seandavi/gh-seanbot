@@ -49,11 +49,32 @@ def test_environment_drops_human_credentials(tmp_path):
         "issues?x=1",
         "issues/../pulls",
         "--hostname",
+        "contents/a/../b",
+        "contents/./x",
+        "issues/..",
+        "contents/...",
+        ".github",
+        "contents/a%2e%2e",
+        "contents//x",
     ],
 )
 def test_api_path_rejected(endpoint):
     with pytest.raises(SeanbotError):
         api_command("owner/test", "GET", endpoint, None)
+
+
+@pytest.mark.parametrize(
+    "endpoint",
+    [
+        "contents/README.md",
+        "contents/.github/workflows/ci.yml",
+        "compare/v1.0...v1.1",
+        "git/ref/heads/release/1.2",
+    ],
+)
+def test_api_path_allows_dotted_segments(endpoint):
+    command = api_command("owner/test", "GET", endpoint, None)
+    assert command[6] == f"repos/owner/test/{endpoint}"
 
 
 def test_api_fixed_host_and_repo(tmp_path):
@@ -129,9 +150,81 @@ def test_push_ignores_source_network_config(tmp_path, monkeypatch):
     assert len(seen) == 1
 
 
+ACCEPTED_BRANCHES = [
+    "release/1.2",
+    "agent/fix-v0.1",
+    "v1.0",
+    "1.2",
+    "a.b.c",
+    "foo./bar",
+    "foo.lock.x",
+]
+# Rejected by git's check-ref-format as refs/heads/<branch>.
+GIT_REJECTED_BRANCHES = [
+    "foo..bar",
+    "a/../b",
+    "foo.",
+    ".foo",
+    "foo/.bar",
+    "a/./b",
+    "foo.lock",
+    "foo/bar.lock",
+    "foo.lock/bar",
+    "foo//bar",
+    "foo/",
+]
+# Rejected only by the stricter character set (git accepts or resolves them differently).
+CHARSET_REJECTED_BRANCHES = ["--all", "foo bar", "foo@{1}"]
+
+
 @pytest.mark.parametrize(
-    "sha,branch", [("main", "test"), ("a" * 40, "--all"), ("a" * 40, "foo//bar")]
+    "sha,branch",
+    [("main", "test")]
+    + [("a" * 40, branch) for branch in GIT_REJECTED_BRANCHES + CHARSET_REJECTED_BRANCHES],
 )
-def test_push_rejects_ambiguous_inputs(tmp_path, sha, branch):
+def test_push_rejects_ambiguous_inputs(tmp_path, monkeypatch, sha, branch):
+    def forbidden(*args, **kwargs):
+        raise AssertionError("no subprocess may run")
+
+    monkeypatch.setattr(subprocess, "check_output", forbidden)
+    monkeypatch.setattr(subprocess, "run", forbidden)
+    monkeypatch.setattr("gh_seanbot.runner.run_process", forbidden)
     with pytest.raises(SeanbotError):
         push("owner/test", sha, branch, tmp_path, {}, 10)
+
+
+@pytest.mark.parametrize("branch", ACCEPTED_BRANCHES)
+def test_push_accepts_dotted_branch(tmp_path, monkeypatch, branch):
+    source = tmp_path / "source"
+    subprocess.run(["git", "init", "--quiet", str(source)], check=True)
+    env = environment(os.environ, "app-token", "owner/test", tmp_path / "home")
+    (tmp_path / "home").mkdir()
+    seen = []
+
+    def stub(command, actual_env, timeout):
+        seen.append(command)
+        return 0
+
+    monkeypatch.setattr("gh_seanbot.runner.run_process", stub)
+    assert push("owner/test", "a" * 40, branch, source, env, 20) == 0
+    assert seen[0][-1] == f"{'a' * 40}:refs/heads/{branch}"
+
+
+@pytest.mark.parametrize(
+    "branch,expected",
+    [(b, True) for b in ACCEPTED_BRANCHES] + [(b, False) for b in GIT_REJECTED_BRANCHES],
+)
+def test_branch_rule_matches_git_ref_format(tmp_path, monkeypatch, branch, expected):
+    git = subprocess.run(["git", "check-ref-format", f"refs/heads/{branch}"], check=False)
+    assert (git.returncode == 0) == expected
+
+    source = tmp_path / "source"
+    subprocess.run(["git", "init", "--quiet", str(source)], check=True)
+    env = environment(os.environ, "app-token", "owner/test", tmp_path / "home")
+    (tmp_path / "home").mkdir()
+    monkeypatch.setattr("gh_seanbot.runner.run_process", lambda command, env, timeout: 0)
+    if expected:
+        assert push("owner/test", "a" * 40, branch, source, env, 20) == 0
+    else:
+        with pytest.raises(SeanbotError, match="Invalid destination branch"):
+            push("owner/test", "a" * 40, branch, source, env, 20)

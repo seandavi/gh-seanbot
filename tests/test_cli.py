@@ -4,6 +4,7 @@ import signal
 import sys
 from datetime import UTC, datetime, timedelta
 
+import httpx
 import pytest
 
 from gh_seanbot.auth import InstallationToken
@@ -11,12 +12,12 @@ from gh_seanbot.cli import _interrupt, execute, main, parser
 from gh_seanbot.config import SeanbotError
 
 
-def arguments():
+def arguments(policy_path="policy.toml"):
     return parser().parse_args(
         [
             "api",
             "--policy",
-            "policy.toml",
+            str(policy_path),
             "--repo",
             "owner/test",
             "--harness",
@@ -50,6 +51,24 @@ def test_lifecycle_and_revocation(policy, monkeypatch):
         "finished",
         "revoked",
     ]
+
+
+def test_unsafe_policy_prevents_audit_and_mint(tmp_path, monkeypatch):
+    audit = tmp_path / "audit.jsonl"
+    path = tmp_path / "policy.toml"
+    path.write_text(f"""audit_log = "{audit}"
+[app]
+client_id = "Iv1.example"
+installation_id = 123
+private_key = "{tmp_path / "app.pem"}"
+[repositories]
+"owner/test" = ["read"]
+""")
+    path.chmod(0o644)
+    monkeypatch.setattr("gh_seanbot.cli.mint", lambda *a: pytest.fail("minted"))
+    with pytest.raises(SeanbotError, match="mode 0600"):
+        execute(arguments(path))
+    assert not audit.exists()
 
 
 def test_failed_mint_never_launches(policy, monkeypatch):
@@ -102,6 +121,95 @@ def test_revocation_failure_is_nonzero(policy, monkeypatch):
     monkeypatch.setattr("gh_seanbot.cli.run_process", lambda *a: 0)
     with pytest.raises(SeanbotError, match="revocation"):
         execute(arguments())
+
+
+def push_argv(branch):
+    return [
+        "push",
+        "--policy",
+        "policy.toml",
+        "--repo",
+        "owner/test",
+        "--harness",
+        "pi",
+        "--model",
+        "provider/model",
+        "--run",
+        "run-123",
+        "--capability",
+        "push",
+        "--sha",
+        "a" * 40,
+        f"--branch={branch}",
+    ]
+
+
+def push_arguments(branch):
+    return parser().parse_args(push_argv(branch))
+
+
+@pytest.mark.parametrize("branch", ["main", "--all", "foo//bar"])
+def test_push_outside_allowlist_never_mints(policy, monkeypatch, branch):
+    monkeypatch.setattr("gh_seanbot.cli.load_policy", lambda *a: policy)
+    monkeypatch.setattr("gh_seanbot.cli.mint", lambda *a: pytest.fail("minted"))
+    with pytest.raises(SeanbotError, match="Destination branch|Invalid destination"):
+        execute(push_arguments(branch))
+    assert not policy.audit_log.exists()
+
+
+def test_push_allowed_branch_lifecycle(policy, monkeypatch):
+    monkeypatch.setattr("gh_seanbot.cli.load_policy", lambda *a: policy)
+    monkeypatch.setattr(
+        "gh_seanbot.cli.mint",
+        lambda *a: InstallationToken("SECRET", datetime.now(UTC) + timedelta(hours=1)),
+    )
+    monkeypatch.setattr("gh_seanbot.cli.revoke", lambda *a: True)
+    monkeypatch.setattr("gh_seanbot.cli.push", lambda *a: 0)
+    assert execute(push_arguments("agent/x")) == 0
+    events = [json.loads(line)["event"] for line in policy.audit_log.read_text().splitlines()]
+    assert events == ["started", "authenticated", "finished", "revoked"]
+
+
+def test_main_reports_branch_denial(policy, monkeypatch, capsys):
+    monkeypatch.setattr("gh_seanbot.cli.load_policy", lambda *a: policy)
+    monkeypatch.setattr("gh_seanbot.cli.mint", lambda *a: pytest.fail("minted"))
+    monkeypatch.setattr(sys, "argv", ["gh-seanbot", *push_argv("main")])
+    assert main() == 1
+    assert capsys.readouterr().err == "gh-seanbot: Destination branch is not allowed by policy\n"
+
+
+def test_scope_mismatch_never_launches(policy, monkeypatch):
+    monkeypatch.setattr("gh_seanbot.cli.load_policy", lambda *a: policy)
+    monkeypatch.setattr("gh_seanbot.cli.run_process", lambda *a: pytest.fail("launched"))
+    methods = []
+
+    def handler(request):
+        methods.append(request.method)
+        if request.method == "GET":
+            return httpx.Response(200, json={"id": 123})
+        if request.method == "DELETE":
+            return httpx.Response(204)
+        return httpx.Response(
+            201,
+            json={
+                "token": "ghs_TEST_SECRET",
+                "expires_at": (datetime.now(UTC) + timedelta(hours=1)).isoformat(),
+                "permissions": {"contents": "write", "issues": "write"},
+                "repository_selection": "selected",
+                "repositories": [{"full_name": "owner/test"}],
+            },
+        )
+
+    real = httpx.Client
+    monkeypatch.setattr(
+        httpx, "Client", lambda **kw: real(transport=httpx.MockTransport(handler), **kw)
+    )
+    with pytest.raises(SeanbotError, match="token revoked"):
+        execute(arguments())
+    assert "DELETE" in methods
+    text = policy.audit_log.read_text()
+    assert "SECRET" not in text
+    assert [json.loads(line)["event"] for line in text.splitlines()] == ["started", "failed"]
 
 
 FOOTER_ARGUMENTS = ["footer", "--harness", "pi", "--model", "provider/model", "--run", "run-123"]

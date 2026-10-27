@@ -1,8 +1,10 @@
+import dataclasses
 import json
+import os
 
 import pytest
 
-from gh_seanbot.config import SeanbotError, load_policy
+from gh_seanbot.config import SeanbotError, check_push_branch, load_policy
 from gh_seanbot.provenance import Audit, Provenance
 
 
@@ -16,6 +18,7 @@ private_key = "/private/app.pem"
 [repositories]
 "owner/test" = ["read", "contribute"]
 """)
+    path.chmod(0o600)
     return path
 
 
@@ -29,6 +32,38 @@ def test_policy_allowlist(tmp_path):
         load_policy(path, "owner/test", "admin")
 
 
+@pytest.mark.parametrize("mode", [0o640, 0o620, 0o604, 0o602])
+def test_policy_rejects_shared_modes(tmp_path, mode):
+    path = config(tmp_path)
+    path.chmod(mode)
+    with pytest.raises(SeanbotError, match="mode 0600"):
+        load_policy(path, "owner/test", "read")
+
+
+def test_policy_accepts_read_only(tmp_path):
+    path = config(tmp_path)
+    path.chmod(0o400)
+    assert load_policy(path, "owner/test", "read").repository == "owner/test"
+
+
+def test_policy_symlink(tmp_path):
+    link = tmp_path / "link"
+    link.symlink_to(config(tmp_path))
+    with pytest.raises(SeanbotError):
+        load_policy(link, "owner/test", "read")
+
+
+def test_policy_not_regular(tmp_path):
+    directory = tmp_path / "dir"
+    directory.mkdir(mode=0o700)
+    directory.chmod(0o700)
+    fifo = tmp_path / "fifo"
+    os.mkfifo(fifo, 0o600)
+    for path in (directory, fifo):
+        with pytest.raises(SeanbotError, match="regular file"):
+            load_policy(path, "owner/test", "read")
+
+
 @pytest.mark.parametrize(
     "old,new",
     [
@@ -36,6 +71,7 @@ def test_policy_allowlist(tmp_path):
         ('"/private/app.pem"', '"relative.pem"'),
         ('["read", "contribute"]', '["admin"]'),
         ('client_id = "Iv1.example"', "client_id = 123"),
+        ('audit_log = "/private', 'extra = 1\naudit_log = "/private'),
     ],
 )
 def test_bad_config(tmp_path, old, new):
@@ -43,6 +79,59 @@ def test_bad_config(tmp_path, old, new):
     path.write_text(path.read_text().replace(old, new))
     with pytest.raises(SeanbotError):
         load_policy(path, "owner/test", "read")
+
+
+def test_push_branch_prefixes_default(tmp_path):
+    assert load_policy(config(tmp_path), "owner/test", "contribute").push_branch_prefixes == (
+        "agent/",
+    )
+
+
+def test_push_branch_prefixes_configured(tmp_path):
+    path = config(tmp_path)
+    path.write_text(
+        path.read_text() + '[push_branch_prefixes]\n"owner/test" = ["bot/", "agent/"]\n'
+    )
+    policy = load_policy(path, "owner/test", "read")
+    assert policy.push_branch_prefixes == ("bot/", "agent/")
+
+
+@pytest.mark.parametrize(
+    "table",
+    [
+        '[push_branch_prefixes]\n"owner/test" = []',
+        '[push_branch_prefixes]\n"owner/test" = "agent/"',
+        '[push_branch_prefixes]\n"owner/test" = ["agent"]',
+        '[push_branch_prefixes]\n"owner/test" = ["/"]',
+        '[push_branch_prefixes]\n"owner/test" = ["../"]',
+        '[push_branch_prefixes]\n"owner/test" = ["agent//"]',
+        '[push_branch_prefixes]\n"owner/test" = [1]',
+    ],
+)
+def test_bad_push_branch_prefixes(tmp_path, table):
+    path = config(tmp_path)
+    path.write_text(path.read_text() + table + "\n")
+    with pytest.raises(SeanbotError):
+        load_policy(path, "owner/test", "read")
+
+
+def test_push_branch_prefixes_scalar(tmp_path):
+    path = config(tmp_path)
+    path.write_text("push_branch_prefixes = 1\n" + path.read_text())
+    with pytest.raises(SeanbotError):
+        load_policy(path, "owner/test", "read")
+
+
+def test_check_push_branch(policy):
+    check_push_branch(policy, "agent/x")
+    for branch in ["main", "agentx/y", "Agent/x", "agent/"]:
+        with pytest.raises(SeanbotError):
+            check_push_branch(policy, branch)
+    bot = dataclasses.replace(policy, push_branch_prefixes=("bot/", "agent/"))
+    check_push_branch(bot, "bot/x")
+    check_push_branch(bot, "agent/x")
+    with pytest.raises(SeanbotError):
+        check_push_branch(bot, "main")
 
 
 def test_footer_roundtrip_and_update():
