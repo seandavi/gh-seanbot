@@ -1,6 +1,6 @@
 # Spec: verify minted token scope matches the request (#12)
 
-Part of #1. Status: proposed (spec stage; no code written).
+Part of #1. Status: implemented (offline mocked tests only; live response shape and revocation unverified, see #5).
 
 ## Goal
 
@@ -88,16 +88,16 @@ Leave `execute` in `cli.py` unchanged. Revocation for this failure lives in `min
 
 ## Acceptance criteria
 
-- [ ] With a mocked 201 response whose `permissions` contain an extra entry (for example `issues: write`), `mint` raises `SeanbotError` matching `scope does not match`, and the mock transport sees `DELETE /installation/token` with `Authorization: Bearer <minted token>`.
-- [ ] Same for a response whose `repositories` names another repository (`owner/other`) or lists a second repository.
-- [ ] Same for: a raised level (requested `contents: read`, granted `contents: write`), a missing permission, missing `permissions`, missing `repositories`, `repository_selection: "all"`, and `metadata: "write"`.
-- [ ] A response granting exactly the requested permissions, or those plus `metadata: "read"`, for `full_name` `owner/test` or `Owner/Test`, returns the token and makes no DELETE request.
-- [ ] If the DELETE returns non-204 after a mismatch, the error message contains `may remain valid`.
-- [ ] A past or unparseable `expires_at` with a token string present also triggers the DELETE.
-- [ ] No error message contains the token value. The existing redaction test still passes.
-- [ ] An end-to-end `execute` call with a mismatched mocked response raises `SeanbotError`, never calls `run_process`, sends the DELETE, and leaves audit events `["started", "failed"]`.
-- [ ] README and `docs/operations.md` are updated as described above. No ADR changes.
-- [ ] `just check` passes (ruff check, ruff format --check, mypy, pytest).
+- [x] With a mocked 201 response whose `permissions` contain an extra entry (for example `issues: write`), `mint` raises `SeanbotError` matching `scope does not match`, and the mock transport sees `DELETE /installation/token` with `Authorization: Bearer <minted token>`.
+- [x] Same for a response whose `repositories` names another repository (`owner/other`) or lists a second repository.
+- [x] Same for: a raised level (requested `contents: read`, granted `contents: write`), a missing permission, missing `permissions`, missing `repositories`, `repository_selection: "all"`, and `metadata: "write"`.
+- [x] A response granting exactly the requested permissions, or those plus `metadata: "read"`, for `full_name` `owner/test` or `Owner/Test`, returns the token and makes no DELETE request.
+- [x] If the DELETE returns non-204 after a mismatch, the error message contains `may remain valid`.
+- [x] A past or unparseable `expires_at` with a token string present also triggers the DELETE.
+- [x] No error message contains the token value. The existing redaction test still passes.
+- [x] An end-to-end `execute` call with a mismatched mocked response raises `SeanbotError`, never calls `run_process`, sends the DELETE, and leaves audit events `["started", "failed"]`.
+- [x] README and `docs/operations.md` are updated as described above. No ADR changes.
+- [x] `just check` passes (ruff check, ruff format --check, mypy, pytest).
 
 ## Test plan
 
