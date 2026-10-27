@@ -1,0 +1,10 @@
+# Credentials and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Local execution records
+logs/
+runs/
