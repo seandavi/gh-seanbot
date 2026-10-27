@@ -1,10 +1,11 @@
 import json
+import sys
 from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from gh_seanbot.auth import InstallationToken
-from gh_seanbot.cli import execute, parser
+from gh_seanbot.cli import execute, main, parser
 from gh_seanbot.config import SeanbotError
 
 
@@ -99,3 +100,58 @@ def test_revocation_failure_is_nonzero(policy, monkeypatch):
     monkeypatch.setattr("gh_seanbot.cli.run_process", lambda *a: 0)
     with pytest.raises(SeanbotError, match="revocation"):
         execute(arguments())
+
+
+def push_argv(branch):
+    return [
+        "push",
+        "--policy",
+        "policy.toml",
+        "--repo",
+        "owner/test",
+        "--harness",
+        "pi",
+        "--model",
+        "provider/model",
+        "--run",
+        "run-123",
+        "--capability",
+        "push",
+        "--sha",
+        "a" * 40,
+        f"--branch={branch}",
+    ]
+
+
+def push_arguments(branch):
+    return parser().parse_args(push_argv(branch))
+
+
+@pytest.mark.parametrize("branch", ["main", "--all", "foo//bar"])
+def test_push_outside_allowlist_never_mints(policy, monkeypatch, branch):
+    monkeypatch.setattr("gh_seanbot.cli.load_policy", lambda *a: policy)
+    monkeypatch.setattr("gh_seanbot.cli.mint", lambda *a: pytest.fail("minted"))
+    with pytest.raises(SeanbotError, match="Destination branch|Invalid destination"):
+        execute(push_arguments(branch))
+    assert not policy.audit_log.exists()
+
+
+def test_push_allowed_branch_lifecycle(policy, monkeypatch):
+    monkeypatch.setattr("gh_seanbot.cli.load_policy", lambda *a: policy)
+    monkeypatch.setattr(
+        "gh_seanbot.cli.mint",
+        lambda *a: InstallationToken("SECRET", datetime.now(UTC) + timedelta(hours=1)),
+    )
+    monkeypatch.setattr("gh_seanbot.cli.revoke", lambda *a: True)
+    monkeypatch.setattr("gh_seanbot.cli.push", lambda *a: 0)
+    assert execute(push_arguments("agent/x")) == 0
+    events = [json.loads(line)["event"] for line in policy.audit_log.read_text().splitlines()]
+    assert events == ["started", "authenticated", "finished", "revoked"]
+
+
+def test_main_reports_branch_denial(policy, monkeypatch, capsys):
+    monkeypatch.setattr("gh_seanbot.cli.load_policy", lambda *a: policy)
+    monkeypatch.setattr("gh_seanbot.cli.mint", lambda *a: pytest.fail("minted"))
+    monkeypatch.setattr(sys, "argv", ["gh-seanbot", *push_argv("main")])
+    assert main() == 1
+    assert capsys.readouterr().err == "gh-seanbot: Destination branch is not allowed by policy\n"

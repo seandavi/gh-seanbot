@@ -11,7 +11,7 @@ from pathlib import Path
 import httpx
 
 from .auth import mint, revoke
-from .config import PROFILES, SeanbotError, load_policy
+from .config import PROFILES, SeanbotError, check_push_branch, load_policy
 from .provenance import Audit, Provenance
 from .runner import api_command, environment, push, run_process
 
@@ -56,6 +56,8 @@ def execute(args: argparse.Namespace) -> int:
     audit = Audit(policy.audit_log)
     if args.command == "push" and args.capability not in {"push", "contribute"}:
         raise SeanbotError("Push requires push or contribute capability")
+    if args.command == "push":
+        check_push_branch(policy, args.branch)
     command = None
     if args.command == "api":
         command = api_command(policy.repository, args.method, args.endpoint, args.input)

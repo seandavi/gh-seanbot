@@ -10,3 +10,7 @@ private_key = "/absolute/private/path/app.pem"
 [repositories]
 "OWNER/TEST_REPOSITORY" = ["read", "issues", "pull-requests", "push"]
 # Opt into "merge" or the broader "contribute" only after approving merge/write policy.
+
+# Optional. Push branches must start with a listed prefix ending in "/"; the default is ["agent/"].
+[push_branch_prefixes]
+"OWNER/TEST_REPOSITORY" = ["agent/"]

@@ -15,7 +15,7 @@ uv sync --locked
 just check
 ```
 
-Copy [`examples/policy.example.toml`](examples/policy.example.toml) to gitignored `policy.toml`. Supply the App client ID, installation ID, absolute key path, private audit path, and repository/capability allowlist. Deliver the key from your secret manager; require mode `0600` and a private parent directory. Create the audit parent directory before use.
+Copy [`examples/policy.example.toml`](examples/policy.example.toml) to gitignored `policy.toml`. Supply the App client ID, installation ID, absolute key path, private audit path, and repository/capability allowlist. `push` destination branches must start with a prefix from the optional `push_branch_prefixes` table (default `agent/`; entries end with `/`); this is checked before a token is minted. Deliver the key from your secret manager; require mode `0600` and a private parent directory. Create the audit parent directory before use.
 
 ```sh
 gh-seanbot api --policy policy.toml --repo OWNER/REPO \
