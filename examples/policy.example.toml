@@ -1,0 +1,12 @@
+# Copy to a gitignored policy.toml and replace placeholders.
+# Create the audit parent directory privately before running.
+audit_log = "/absolute/private/path/audit.jsonl"
+
+[app]
+client_id = "Iv1.REPLACE_ME"
+installation_id = 123456
+private_key = "/absolute/private/path/app.pem"
+
+[repositories]
+"OWNER/TEST_REPOSITORY" = ["read", "issues", "pull-requests", "push"]
+# Opt into "merge" or the broader "contribute" only after approving merge/write policy.

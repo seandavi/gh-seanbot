@@ -8,3 +8,13 @@
 # Local execution records
 logs/
 runs/
+
+# Python/build artifacts and local policy
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+dist/
+policy.toml

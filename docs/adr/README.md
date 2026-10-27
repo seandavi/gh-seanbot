@@ -6,6 +6,7 @@ ADRs capture architectural choices and their trade-offs; the [rollout plan](../.
 | --- | --- | --- |
 | [0001](0001-shared-github-app-identity.md) | Use one shared GitHub App for agent activity | Proposed |
 | [0002](0002-scoped-credentials-without-human-fallback.md) | Isolate agent credentials and fail closed | Proposed |
+| [0003](0003-reuse-actions-auth-and-bound-local-operations.md) | Reuse official Actions authentication and bound local operations | Proposed |
 
 Table legend: **Proposed** means recorded for discussion, not approved or implemented.
 
