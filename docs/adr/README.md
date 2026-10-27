@@ -1,6 +1,6 @@
 # Architecture decision records
 
-ADRs capture architectural choices and their trade-offs; the [rollout plan](../../README.md) tracks setup and verification.
+ADRs capture architectural choices and their trade-offs; the [rollout plan](../rollout.md) tracks setup and verification.
 
 | ADR | Decision | Status |
 | --- | --- | --- |
@@ -12,4 +12,4 @@ Table legend: **Proposed** means recorded for discussion, not approved or implem
 
 Use sequential `NNNN-short-title.md` filenames. Keep each record focused on the context, choice, and meaningful alternatives or consequences. Mark decisions accepted only when agreed; record superseding decisions with links when direction changes. Revisit decisions when constraints or evidence change—ADRs explain reasoning, not immutable constraints.
 
-Commit trailers and text-footer syntax remain proposed conventions in the rollout plan, not accepted architectural decisions.
+Commit trailers and text-footer syntax remain [proposed conventions](../rollout.md#proposed-conventions) in the rollout plan, not accepted architectural decisions.
